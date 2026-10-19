@@ -1,0 +1,62 @@
+name: release-package
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: npm install --global pnpm@11.25.0
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend build
+      - run: python deploy/build_release.py
+      - run: bash -n install.sh online-install.sh
+      - name: Validate tag and build version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python -c 'import os; from app import __version__; assert os.environ["RELEASE_TAG"] == "v" + __version__'
+      - name: Smoke-test managed services
+        run: |
+          mkdir /tmp/session-watch-release
+          tar -xzf dist/session-watch-v*-linux.tar.gz -C /tmp/session-watch-release
+          cd /tmp/session-watch-release/session-watch
+          sudo env SESSION_WATCH_PYTHON="$(command -v python)" bash install.sh install --instance ci --port 18765 --no-collector --no-install-deps
+          sudo session-watch-ci backup
+          sudo env SESSION_WATCH_PYTHON="$(command -v python)" bash install.sh upgrade --instance ci --no-install-deps
+          sudo session-watch-ci rollback
+          sudo session-watch-ci uninstall --purge
+      - uses: actions/upload-artifact@v4
+        with:
+          name: session-watch-release
+          path: dist/*
+          if-no-files-found: error
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: session-watch-release
+          path: dist
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --draft --verify-tag --title "Session Watch $RELEASE_TAG" --generate-notes

@@ -1,0 +1,28 @@
+services:
+  session-watch:
+    build: .
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - session-watch-data:/data
+      # Optional: mount ONLY the log directory read-only, then configure
+      # /logs/access.log in the UI. Never mount x-ui.db or the Docker socket.
+      # - /var/log/xray:/logs:ro
+      # Local mode: run deploy/local_collector.py on the host; mount only
+      # its sanitized snapshot directory with a readable UID/GID mapping.
+      # - /var/lib/session-watch-local:/var/lib/session-watch-local:ro
+    environment:
+      SESSION_WATCH_SECURE_COOKIE: "0"
+      SESSION_WATCH_ALLOWED_HOSTS: "127.0.0.1,localhost"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  session-watch-data:
+
