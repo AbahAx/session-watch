@@ -113,7 +113,12 @@ def main(package):
                  '--port','18766','--no-install-deps'])
             installed=True
             status=Path('/var/lib/session-watch-'+instance+'-local/source.json')
-            wait(lambda: status.is_file() and json.loads(status.read_text()).get('ready'),'sandboxed discovery')
+            try:
+                wait(lambda: status.is_file() and json.loads(status.read_text()).get('ready'),'sandboxed discovery')
+            except AssertionError:
+                print('Sandbox status:',status.read_text() if status.exists() else 'missing',flush=True)
+                print(run(['journalctl','-u','session-watch-'+instance+'-local.service','-n','30','--no-pager']).stdout,flush=True)
+                raise
             snapshot=json.loads(status.with_name('snapshot.json').read_text())
             assert snapshot['clients_ok'] and snapshot['online_ok']
             request=Path('/var/lib/session-watch-'+instance+'-control/preview.json')

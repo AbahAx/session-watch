@@ -63,6 +63,19 @@ class Runtime:
             if settings.source_type == "local":
                 try:
                     local = read_snapshot(settings)
+                    if source_control.managed():
+                        generation, target = local.get('source_generation'), local.get('source_id')
+                        previous = self.store.get('observed_local_source', {})
+                        if generation and previous and previous.get('generation') != generation:
+                            self.reader.close()
+                            with self.store.transaction() as db:
+                                db.execute('UPDATE sessions SET stats_incomplete=1 WHERE ended_at IS NULL')
+                                if target != previous.get('target'):
+                                    db.execute("UPDATE sessions SET state='offline',ended_at=last_online WHERE ended_at IS NULL")
+                                    db.execute("UPDATE users SET baseline='baseline'")
+                                self.engine.poll(db, None, time.time(), settings)
+                        if generation:
+                            self.store.set('observed_local_source', {'generation': generation, 'target': target})
                     with self.store.transaction() as db:
                         sync_clients(db, local)
                     self.health['clients'] = len(local['clients']) if local['clients_ok'] else self.health['clients']
@@ -86,6 +99,11 @@ class Runtime:
                 for _ in range(20):
                     cursor = self.store.get("log_cursor")
                     events, cursor, logs_ready, skipped = self.reader.read(source_control.effective_log_path(settings), cursor, settings.log_timezone)
+                    if settings.source_type == 'local' and source_control.managed():
+                        metadata = source_control.status() or {}
+                        if (not metadata.get('ready') or metadata.get('generation') != (local or {}).get('source_generation') or
+                                metadata.get('mirror_identity') != cursor['identity']):
+                            raise ValueError('Source switching or not ready')
                     with self.store.transaction() as db:
                         self.engine.ingest(db, events, time.time())
                         db.execute("INSERT INTO kv VALUES ('log_cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(cursor),))

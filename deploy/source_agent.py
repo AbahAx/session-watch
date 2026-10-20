@@ -1,5 +1,6 @@
 """Privileged read-only discovery + mirror; web never receives Docker access."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -95,6 +96,10 @@ class Agent:
                 self.bridge = Bridge(path, self.mirror)
                 self.identity = identity
             self.bridge.step()
+            generation = '\0'.join((source['id'], configured, str((source.get('process') or {}).get('pid', ''))))
+            metadata['generation'] = hashlib.sha256(generation.encode()).hexdigest()
+            info = self.bridge.output.stat()
+            metadata['mirror_identity'] = [info.st_dev, info.st_ino]
             metadata.update(ready=True, configured_path=configured, message='访问日志已接入，持续自动检测中')
         except (OSError, ValueError, KeyError) as exc:
             if self.bridge:
@@ -103,6 +108,8 @@ class Agent:
             self.identity = None
             (self.mirror / 'heartbeat').unlink(missing_ok=True)
             metadata['message'] = str(exc) if isinstance(exc, ValueError) else '来源暂时不可读；将自动重新检测'
+        data['source_generation'] = metadata.get('generation')
+        data['source_id'] = metadata.get('selected')
         publish(self.spool, data)
         atomic_json(self.spool / 'source.json', metadata)
         self.last_collect = time.monotonic()

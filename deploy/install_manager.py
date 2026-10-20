@@ -258,6 +258,7 @@ def render_units(layout, state):
         collector = prefix + ' read-only local source\nAfter=network.target\n\n[Service]\n' + common_unit('root', name, current)
         collector += f'ReadWritePaths={unit_quote(layout.local)} {unit_quote(layout.bridge)}\nInaccessiblePaths={unit_quote(layout.data)} /etc/shadow /etc/gshadow /etc/ssh\n'
         collector += 'ProtectHome=read-only\nCapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH\n'
+        collector += 'PrivateTmp=false\nReadOnlyPaths=/tmp /var/tmp\n'
         collector += 'IPAddressDeny=any\nIPAddressAllow=localhost\n'
         cmd = [python, current / 'deploy/source_agent.py', '--spool', layout.local,
                '--mirror', layout.bridge, '--control', layout.control, '--config', layout.config / 'source.json']
