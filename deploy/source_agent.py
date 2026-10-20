@@ -38,6 +38,7 @@ def read_request(path):
 class Agent:
     def __init__(self, hints, control, spool, mirror):
         self.hints, self.control, self.spool, self.mirror = hints, control, spool, mirror
+        self.spool.mkdir(parents=True, mode=0o750, exist_ok=True)
         self.bridge = None
         self.identity = None
         self.preference = {'target': 'auto', 'log_mode': 'auto', 'log_path': ''}

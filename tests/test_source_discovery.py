@@ -138,6 +138,7 @@ class TestPosixDiscovery:
         monkeypatch.setattr('deploy.source_agent.collect_source',lambda _:dict(version=1,generated_at=time.time(),clients_ok=True,online_ok=True,clients=[],online=[]))
         agent=Agent({},tmp_path/'control',tmp_path/'snapshot',tmp_path/'mirror')
         agent.refresh({'target':'auto','log_mode':'auto','log_path':''})
+        assert agent.bridge is not None
         before=agent.identity
         missing=agent.inspect({'target':'native','log_mode':'manual','log_path':str(tmp_path/'missing.log')},[source])
         assert not missing['ok'] and agent.identity==before
