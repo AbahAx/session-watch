@@ -101,8 +101,7 @@ class Runtime:
                     events, cursor, logs_ready, skipped = self.reader.read(source_control.effective_log_path(settings), cursor, settings.log_timezone)
                     if settings.source_type == 'local' and source_control.managed():
                         metadata = source_control.status() or {}
-                        if (not metadata.get('ready') or metadata.get('generation') != (local or {}).get('source_generation') or
-                                metadata.get('mirror_identity') != cursor['identity']):
+                        if not metadata.get('ready') or metadata.get('generation') != (local or {}).get('source_generation'):
                             raise ValueError('Source switching or not ready')
                     with self.store.transaction() as db:
                         self.engine.ingest(db, events, time.time())

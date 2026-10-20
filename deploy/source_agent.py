@@ -78,6 +78,10 @@ class Agent:
             path, configured = log_source(source, preference, self.hints)
             identity = (source['id'], str(path))
             if identity != self.identity:
+                # Announce a source transition before changing mirror inodes.
+                # Normal spool rotation keeps the same source generation and
+                # the web reader may still drain its previous file descriptor.
+                atomic_json(self.spool / 'source.json', {**metadata, 'message': '正在接入访问日志'})
                 if self.bridge:
                     self.bridge.close()
                 self.mirror.mkdir(parents=True, mode=0o750, exist_ok=True)

@@ -1,6 +1,12 @@
 from fastapi.testclient import TestClient
 from app.main import create_app
 from app import source_control
+import asyncio
+import json
+import time
+from app.models import Settings
+from app.runtime import Runtime
+from app.storage import Store
 
 HEADERS={'X-Requested-With':'session-watch'}
 
@@ -34,3 +40,24 @@ def test_failed_manual_preview_preserves_saved_source(tmp_path,monkeypatch):
         response=client.post('/api/settings/check-save',headers=HEADERS,json={'log_mode':'manual','log_path':'/var/log/x-ui/missing.log'})
         assert not response.json()['saved']
         assert client.app.state.store.settings()==before
+
+
+def test_mirror_rotation_does_not_block_drain_for_same_source_generation(tmp_path,monkeypatch):
+    control=tmp_path/'control';control.mkdir()
+    log=tmp_path/'mirror.log';log.touch()
+    status=tmp_path/'source.json'
+    status.write_text(json.dumps({'format':1,'ready':True,'generation':'same-source','mirror_identity':[0,0]}))
+    snapshot=tmp_path/'snapshot.json'
+    snapshot.write_text(json.dumps({'version':1,'generated_at':time.time(),'clients_ok':True,'online_ok':True,
+                                   'clients':[],'online':[],'source_generation':'same-source','source_id':'native'}))
+    monkeypatch.setenv('SESSION_WATCH_SOURCE_CONTROL',str(control))
+    monkeypatch.setenv('SESSION_WATCH_SOURCE_STATUS',str(status))
+    monkeypatch.setenv('SESSION_WATCH_MANAGED_LOG',str(log))
+    store=Store(tmp_path/'app')
+    store.save_settings(Settings(local_snapshot_path=str(snapshot),monitor_enabled=True))
+    runtime=Runtime(store)
+    try:
+        asyncio.run(runtime.tick())
+        assert runtime.health['log']=='ok'
+    finally:
+        asyncio.run(runtime.stop());store.close()
