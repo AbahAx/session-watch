@@ -3,7 +3,7 @@ export type Settings = {
   settings_revision?: number;
   panel_url: string; panel_username: string; panel_password?: string; panel_totp?: string;
   panel_password_configured?: boolean; panel_totp_configured?: boolean;
-  online_api: 'auto' | 'clients' | 'inbounds'; log_path: string;
+  online_api: 'auto' | 'clients' | 'inbounds'; log_path: string; log_mode: 'auto'|'manual'; local_target: string;
   poll_seconds: number; offline_seconds: number; timezone: string; log_timezone: string;
   top_targets: number; retention_days: number; telegram_enabled: boolean; ip_location_enabled: boolean;
   telegram_token?: string; telegram_token_configured?: boolean; telegram_chat_id: string;
@@ -18,7 +18,7 @@ export type Session = { id: number; email: string; alias: string; state: string;
   first_target: string; first_inbound: string }
 export type Notification = { id: number; alias: string; email: string; kind: string; text: string;
   created_at: number; status: string; error: string; attempts: number; session_id: number }
-export type Snapshot = { version: string; now: number; settings: Settings; admin_username: string;
+export type Snapshot = { version: string; now: number; settings: Settings; admin_username: string; source_status: {ready:boolean; message:string; configured_path?:string; selected?:string; choices:{id:string;label:string;kind:string}[]} | null;
   health: { panel: string; log: string; inventory: string; last_inventory: number | null; last_log_check: number | null;
     log_detail: string; last_poll: number | null; last_log: number | null; parsed: number; skipped: number; detail: string };
   delivery: {status: string; pending: number; failed: number; oldest: number | null; last_success: number | null; last_error: string};

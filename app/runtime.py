@@ -56,6 +56,8 @@ class Runtime:
     async def tick(self):
         async with self.guard:
             settings = self.store.settings()
+            from app import source_control
+            source_control.publish_preferences(settings)
             local = None
             local_error = None
             if settings.source_type == "local":
@@ -83,7 +85,7 @@ class Runtime:
                 # Read bounded batches, checkpointing with the event transaction.
                 for _ in range(20):
                     cursor = self.store.get("log_cursor")
-                    events, cursor, logs_ready, skipped = self.reader.read(settings.log_path, cursor, settings.log_timezone)
+                    events, cursor, logs_ready, skipped = self.reader.read(source_control.effective_log_path(settings), cursor, settings.log_timezone)
                     with self.store.transaction() as db:
                         self.engine.ingest(db, events, time.time())
                         db.execute("INSERT INTO kv VALUES ('log_cursor',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(cursor),))

@@ -2,6 +2,7 @@ name: release-package
 on:
   workflow_dispatch:
   push:
+    branches: ['main']
     tags: ['v*']
 permissions:
   contents: read
@@ -38,6 +39,8 @@ jobs:
           sudo env SESSION_WATCH_PYTHON="$(command -v python)" bash install.sh upgrade --instance ci --no-install-deps
           sudo session-watch-ci rollback
           sudo session-watch-ci uninstall --purge
+      - name: Real Docker discovery and sandbox integration
+        run: sudo "$(command -v python)" tests/docker_smoke.py --package /tmp/session-watch-release/session-watch
       - uses: actions/upload-artifact@v4
         with:
           name: session-watch-release

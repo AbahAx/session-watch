@@ -23,6 +23,7 @@ from app.local_source import read_snapshot, sync_clients, online_set
 from app.runtime import InstanceLock, Runtime
 from app.storage import SECRET_FIELDS, Store, password_hash, password_matches, token_hash
 from app.configuration import SOURCE_FIELDS, inspect_source
+from app import source_control
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -40,6 +41,7 @@ def create_app(data_dir: Path | None = None, background=True):
     async def lifespan(app):
         lock.acquire()
         try:
+            source_control.publish_preferences(store.settings())
             if background:
                 await runtime.start()
             yield
@@ -187,10 +189,16 @@ def create_app(data_dir: Path | None = None, background=True):
             if candidate.monitor_enabled and candidate.telegram_enabled and not all([candidate.telegram_token, candidate.telegram_chat_id]):
                 raise HTTPException(400, '请填写 Telegram 配置，或关闭实际发送')
             result = await inspect_source(candidate) if check else None
-            if result is not None and not result['ok']:
+            waiting = (result is not None and not result['ok'] and source_control.managed() and
+                       not old.monitor_enabled and candidate.source_type == 'local' and candidate.log_mode == 'auto' and
+                       result['checks']['inventory'] and result['checks']['online'] and not result['checks']['log'])
+            if result is not None and not result['ok'] and not waiting:
                 return {**result, 'saved': False}
+            if waiting:
+                result['message'] += '；自动检测配置已保存，文件可用后会自行接入'
             async with runtime.delivery_guard:
                 store.save_settings(candidate)
+                source_control.publish_preferences(candidate)
                 if changed:
                     runtime.reader.close()
                     await runtime.panel.close()
@@ -215,6 +223,10 @@ def create_app(data_dir: Path | None = None, background=True):
         async with runtime.guard, runtime.delivery_guard:
             settings = store.settings()
             if body.enabled:
+                if settings.source_type == 'local' and source_control.managed():
+                    result = await inspect_source(settings)
+                    if not result['ok']:
+                        raise HTTPException(400, result['message'])
                 if settings.source_type == 'local':
                     try:
                         data = read_snapshot(settings)
@@ -225,7 +237,7 @@ def create_app(data_dir: Path | None = None, background=True):
                         raise HTTPException(400, str(exc)) from None
                 elif not all([settings.panel_url, settings.panel_username, settings.panel_password]):
                     raise HTTPException(400, "请先配置面板连接和日志路径")
-                if not settings.log_path:
+                if not source_control.effective_log_path(settings):
                     raise HTTPException(400, "请先配置日志路径")
                 if settings.telegram_enabled and not all([settings.telegram_token, settings.telegram_chat_id]):
                     raise HTTPException(400, "请先填写 Telegram 配置，或关闭实际发送")
@@ -267,6 +279,13 @@ def create_app(data_dir: Path | None = None, background=True):
     @app.post('/api/source/detect', dependencies=[Depends(require_auth)])
     async def detect_source():
         settings = store.settings()
+        if source_control.managed():
+            candidate = settings.model_copy(update={'log_mode': 'auto'})
+            result = await inspect_source(candidate)
+            metadata = source_control.status() or {}
+            return {**result, 'source_status': metadata,
+                    'detected': {'source_type': 'local', 'log_mode': 'auto', 'local_target': candidate.local_target},
+                    'message': result['message'] + '；自动模式会持续检测，日志生成后自动接入'}
         snapshots = list(dict.fromkeys([settings.local_snapshot_path, Settings().local_snapshot_path]))
         logs = [settings.log_path, '/var/lib/session-watch-bridge/access.log']
         heartbeat = os.environ.get('SESSION_WATCH_BRIDGE_HEARTBEAT')
@@ -411,6 +430,7 @@ def create_app(data_dir: Path | None = None, background=True):
         return {
             "version": __version__, "now": now, "settings": store.public_settings(),
             "admin_username": store.get('admin')['username'],
+            'source_status': source_control.status(),
             "health": runtime.health, 'delivery': runtime.delivery_health(),
             "users": users, "sessions": sessions, "notifications": notifications, "targets": targets,
             "totals": {**totals, "online": sum(u["state"] == "online" for u in users), "pending": sum(u["state"] == "pending" for u in users),

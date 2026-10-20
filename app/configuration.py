@@ -3,16 +3,19 @@ import os
 
 from app.integrations import IntegrationError, PanelClient
 from app.local_source import read_snapshot, online_set
+from app import source_control
 
 SOURCE_FIELDS = {'source_type', 'local_snapshot_path', 'panel_url', 'panel_username',
-                 'panel_password', 'panel_totp', 'online_api', 'log_path', 'log_timezone'}
+                 'panel_password', 'panel_totp', 'online_api', 'log_path', 'log_timezone', 'log_mode', 'local_target'}
 
 
 async def inspect_source(settings):
+    if settings.source_type == 'local' and source_control.managed():
+        return await source_control.preview(settings)
     result = {'ok': False, 'message': '', 'online_count': 0, 'client_count': 0, 'log_readable': False,
               'checks': {'inventory': False, 'online': False, 'log': False}}
     try:
-        path = Path(settings.log_path)
+        path = Path(source_control.effective_log_path(settings))
         if not path.is_file():
             raise OSError()
         with path.open('rb') as stream:

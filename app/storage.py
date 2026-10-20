@@ -102,6 +102,8 @@ class Store:
 
     def settings(self) -> Settings:
         data = self.get("settings", {})
+        if 'log_mode' not in data and data.get('log_path') and not data['log_path'].endswith('-bridge/access.log'):
+            data['log_mode'] = 'manual'
         for field in SECRET_FIELDS:
             if data.get(field):
                 data[field] = self.vault.decrypt(data[field].encode()).decode()

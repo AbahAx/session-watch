@@ -1,4 +1,4 @@
-# Linux 一键部署（v0.5.0）
+# Linux 一键部署（v0.6.0）
 
 这是独立的 Session Watch 安装包。服务器不需要 Node、npm 或 Docker。
 同机模式只读本机已有 3x-ui 数据库、Xray 在线统计接口和访问日志；不需要面板账号密码。
@@ -31,14 +31,14 @@ Python 3.14 尚未纳入本版本支持范围。
 
 ## 1. 上传并安装
 
-将 `session-watch-v0.5.0-linux.tar.gz` 和 `SHA256SUMS` 上传到新服务器的同一目录。
+将 `session-watch-v0.6.0-linux.tar.gz` 和 `SHA256SUMS` 上传到新服务器的同一目录。
 官方源码仓库为 [AbahAx/session-watch](https://github.com/AbahAx/session-watch)。
 安装包从 [Releases](https://github.com/AbahAx/session-watch/releases) 下载并核对校验值；
 如果尚无正式版本，请使用已下载的本地安装包，不要使用网上猜测的安装链接。
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf session-watch-v0.5.0-linux.tar.gz
+tar -xzf session-watch-v0.6.0-linux.tar.gz
 cd session-watch
 sudo bash install.sh
 ```
@@ -102,7 +102,7 @@ bash <(curl -fsSL https://github.com/AbahAx/session-watch/releases/latest/downlo
 
 ```bash
 # 安装指定正式版本
-bash online-install.sh --repo AbahAx/session-watch --version v0.5.0 install
+bash online-install.sh --repo AbahAx/session-watch --version v0.6.0 install
 
 # 安装并直接提供公网 HTTPS；替换示例域名/现有证书路径
 bash online-install.sh --repo AbahAx/session-watch install \
@@ -144,9 +144,27 @@ sudo bash install.sh install \
 
 ## 3. 自动检测及手动指定来源
 
-默认检测常见的 3x-ui 数据库、核心配置、Xray 二进制和核心实际使用的访问日志。
-相对日志路径依据正在运行的 Xray 进程工作目录解析，不能确定时提示手动指定，
-不会简单把 `./access.log` 当成配置文件同目录的文件。
+从 v0.6.0 起，独立 source-agent 持续发现来源，不再要求安装时日志文件已经存在。
+默认每约 5 秒重新检测：原生 Xray 实际进程、当前配置、运行目录，以及本机 Docker 容器、
+bind mount、named volume、容器内文件。仅安装在 Docker 宿主机上的本项目 Linux 服务支持此自动模式；
+本项目 Web 容器自身不需要、也不应挂载 Docker socket。
+
+“节点接入”可选择“自动检测”或“手动指定”。自动模式下，日志后开启、文件后生成或路径变化后自行接入；
+手动模式固定所填路径，不会被自动检测覆盖。本机使用绝对路径；Docker 可填所选容器内绝对路径，
+或 `docker://容器名/绝对路径`。手动文件位于该核心的运行/日志目录，其他宿主机目录由 root 使用 `--log` 授权。
+
+发现多个 3x-ui 时，在页面“采集实例”选择一个；程序不猜测、不合并不同节点的数据。
+Docker 目标按容器名跟踪，重建同名容器后重新解析 PID、根目录与挂载。
+Docker 客户端数据库需要 bind mount 或 named volume（官方 `/etc/x-ui` 持久卷布局受支持）；
+日志可在挂载目录中，也可仅存在容器内部。自动模式不会自行开启 Xray 日志或统计接口。
+标准输出/标准错误未配置文件时会提示原因，不猜测 Docker 控制台混合输出为访问日志。
+
+采集器使用 Docker GET 查询容器信息；在线查询仅进入目标网络 namespace，执行本项目自己的固定查询程序，
+调用已有只读 `GetAllOnlineUsers`。不执行容器程序、不使用 Docker exec、不修改或重启原容器。
+Web 继续为无特权用户，只访问快照和日志副本；独立采集服务有只读源访问及 network namespace 所需能力。
+自动模式限同一 Linux 宿主机、普通 rootful Docker；远程 Docker、Windows Docker Desktop、rootless Docker 暂不承诺。
+
+原生安装位置异常时，仍可显式指定来源路径：
 
 ```bash
 sudo bash install.sh install \

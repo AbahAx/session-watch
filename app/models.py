@@ -17,6 +17,8 @@ class Settings(BaseModel):
     panel_totp: str = Field(default="", max_length=16)
     online_api: Literal["auto", "clients", "inbounds"] = "auto"
     log_path: str = Field(default="", max_length=1000)
+    log_mode: Literal['auto', 'manual'] = 'auto'
+    local_target: str = Field(default='auto', pattern=r'^(auto|native|docker:[A-Za-z0-9][A-Za-z0-9_.-]{0,127})$')
     poll_seconds: int = Field(default=10, ge=5, le=60)
     offline_seconds: int = Field(default=300, ge=300, le=3600)
     timezone: str = "Asia/Shanghai"

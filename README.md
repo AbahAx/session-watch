@@ -2,7 +2,7 @@
 
 独立的 Xray 客户端活动监控与 Telegram 通知面板。
 
-**v0.5.0。** 同机部署可免输 3x-ui 账号密码，自动同步客户端清单、查询已有 Xray
+**v0.6.0。** 同机部署可免输 3x-ui 账号密码，自动同步客户端清单、查询已有 Xray
 在线状态并只读解析访问日志；不修改 3x-ui 程序、数据库、入站或客户端配置。
 仅提供正式运行，默认暂停活动统计与 Telegram 发送。本仓库不包含真实服务器资料或凭据。
 
@@ -14,7 +14,7 @@
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf session-watch-v0.5.0-linux.tar.gz
+tar -xzf session-watch-v0.6.0-linux.tar.gz
 cd session-watch
 sudo bash install.sh
 ```
@@ -35,6 +35,8 @@ bash <(curl -fsSL https://github.com/AbahAx/session-watch/releases/latest/downlo
 
 ## 功能
 
+- 持续自动发现原生与 Docker 3x-ui：读取当前核心日志配置，跟随日志延迟生成、路径变更和容器重建。
+- 支持自动或手动日志路径；多个实例明确选择，日志和在线数据保持来自同一实例。
 - 中文响应式管理界面：活动概览、客户端、活动记录、日志来源、通知中心、系统设置。
 - 独立管理员账号、登录限流、HttpOnly 会话 Cookie、修改用户名/密码及其他会话失效。
 - 按 email 识别账号，自定义显示名称、暂停单个账号监控。

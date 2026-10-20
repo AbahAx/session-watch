@@ -73,11 +73,13 @@ def test_units_keep_sources_readonly_and_web_unprivileged():
     units = manager.render_units(layout, state)
     web = units[layout.name + '.service']
     collector = units[layout.name + '-local.service']
-    bridge = units[layout.name + '-bridge.service']
+    assert layout.name + '-bridge.service' not in units
     assert 'User=session-watch-test\n' in web
     assert 'User=root\n' in collector
     assert 'ProtectSystem=strict' in collector and 'IPAddressDeny=any' in collector
-    assert 'RestrictAddressFamilies=\nRestrictAddressFamilies=AF_UNIX' in bridge
+    assert 'source_agent.py' in collector
+    assert 'CAP_SYS_ADMIN' in collector and 'CAP_SYS_ADMIN' not in web
+    assert '/run/docker.sock' in web and manager.unit_quote(layout.control) in web
     assert 'InaccessiblePaths=' in web and 'x-ui.db' in web
     for unit in units.values():
         for line in unit.splitlines():

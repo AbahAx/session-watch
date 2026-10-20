@@ -79,6 +79,7 @@ class Layout:
         self.data = Path('/var/lib') / self.name
         self.local = Path('/var/lib') / (self.name + '-local')
         self.bridge = Path('/var/lib') / (self.name + '-bridge')
+        self.control = Path('/var/lib') / (self.name + '-control')
         self.config = Path('/etc') / self.name
         self.backups = Path('/var/backups') / self.name
         self.wrapper = Path('/usr/local/bin') / self.name
@@ -95,7 +96,7 @@ class Layout:
         return state
 
     def assert_safe_roots(self):
-        for path in (self.home, self.data, self.local, self.bridge, self.config, self.backups):
+        for path in (self.home, self.data, self.local, self.bridge, self.control, self.config, self.backups):
             if path.is_symlink() or path.resolve() != path or os.path.ismount(path):
                 raise ValueError(f"Managed root must be a real directory, not a symlink/mount: {path}")
         if self.wrapper.is_symlink():
@@ -185,7 +186,7 @@ def source_paths(args, layout):
                 sources['log'] = str(path.resolve())
     for value in filter(None, sources.values()):
         unit_quote(value)
-        if any(Path(value).is_relative_to(root) for root in (layout.home, layout.data, layout.local, layout.bridge, layout.config, layout.backups)):
+        if any(Path(value).is_relative_to(root) for root in (layout.home, layout.data, layout.local, layout.bridge, layout.control, layout.config, layout.backups)):
             raise ValueError("Original source files cannot be inside managed directories")
     return sources
 
@@ -239,9 +240,9 @@ def render_units(layout, state):
     prefix = '[Unit]\nDescription=Session Watch'
     install = '\n[Install]\nWantedBy=multi-user.target\n'
     web = prefix + '\nAfter=network.target\n\n[Service]\n' + common_unit(name, name, current)
-    web += f'EnvironmentFile={layout.config / "web.env"}\nReadWritePaths={unit_quote(layout.data)}\n'
-    hidden = {'/etc/x-ui', '/usr/local/x-ui', '/var/log/x-ui', '/etc/shadow', '/etc/gshadow', '/etc/ssh'}
-    hidden.update(v for v in sources.values() if v)
+    web += f'EnvironmentFile={layout.config / "web.env"}\nReadWritePaths={unit_quote(layout.data)} {unit_quote(layout.control)}\n'
+    hidden = {'/etc/x-ui', '/usr/local/x-ui', '/var/log/x-ui', '/etc/shadow', '/etc/gshadow', '/etc/ssh', '/var/lib/docker', '/run/docker.sock', '/var/run/docker.sock'}
+    hidden.update(v for v in sources.values() if isinstance(v, str) and v)
     web += 'InaccessiblePaths=' + ' '.join(unit_quote('-' + v) for v in sorted(hidden)) + '\n'
     command = [python, '-m', 'uvicorn', 'app.main:create_app', '--factory', '--host', c['host'], '--port', str(c['port']), '--no-access-log', '--no-proxy-headers']
     if c['cert']:
@@ -253,21 +254,15 @@ def render_units(layout, state):
         web += ' --ssl-certfile %d/tls-cert --ssl-keyfile %d/tls-key'
     web += '\n' + install
     units = {name + '.service': web}
-    if all(sources[k] for k in ('database', 'config', 'binary')):
+    if not state.get('collector_disabled', False):
         collector = prefix + ' read-only local source\nAfter=network.target\n\n[Service]\n' + common_unit('root', name, current)
-        collector += f'ReadWritePaths={unit_quote(layout.local)}\nInaccessiblePaths={unit_quote(layout.data)} /etc/shadow /etc/gshadow /etc/ssh\n'
+        collector += f'ReadWritePaths={unit_quote(layout.local)} {unit_quote(layout.bridge)}\nInaccessiblePaths={unit_quote(layout.data)} /etc/shadow /etc/gshadow /etc/ssh\n'
+        collector += 'ProtectHome=read-only\nCapabilityBoundingSet=CAP_SYS_ADMIN CAP_SYS_PTRACE CAP_DAC_READ_SEARCH\n'
         collector += 'IPAddressDeny=any\nIPAddressAllow=localhost\n'
-        cmd = [state['python'], current / 'deploy/local_collector.py', '--spool', layout.local]
-        for key in ('database', 'config', 'binary'):
-            cmd += ['--' + key, sources[key]]
+        cmd = [python, current / 'deploy/source_agent.py', '--spool', layout.local,
+               '--mirror', layout.bridge, '--control', layout.control, '--config', layout.config / 'source.json']
         collector += 'ExecStart=' + ' '.join(unit_quote(v) for v in cmd) + '\n' + install
         units[name + '-local.service'] = collector
-    if sources['log']:
-        bridge = prefix + ' read-only log mirror\n\n[Service]\n' + common_unit('root', name, current)
-        bridge += f'ReadWritePaths={unit_quote(layout.bridge)}\nInaccessiblePaths={unit_quote(layout.data)} /etc/shadow /etc/gshadow /etc/ssh\n'
-        bridge += 'RestrictAddressFamilies=\nRestrictAddressFamilies=AF_UNIX\n'
-        bridge += 'ExecStart=' + ' '.join(unit_quote(v) for v in [state['python'], current / 'deploy/log_bridge.py', '--source', sources['log'], '--spool', layout.bridge]) + '\n' + install
-        units[name + '-bridge.service'] = bridge
     if c['cert']:
         # Watch parent entries too: ACME tools atomically replace live symlinks,
         # while an inotify watch on the file alone follows the old target.
@@ -283,8 +278,11 @@ def environment(layout, state):
     pairs = {'SESSION_WATCH_DATA': str(layout.data), 'SESSION_WATCH_SECURE_COOKIE': '1' if c['cert'] else '0',
              'SESSION_WATCH_ALLOWED_HOSTS': '127.0.0.1,localhost' + (',' + c['domain'] if c['domain'] else ''),
              'SESSION_WATCH_PUBLIC_ORIGIN': origin}
-    if state['sources']['log']:
+    if not state.get('collector_disabled', False):
         pairs['SESSION_WATCH_BRIDGE_HEARTBEAT'] = str(layout.bridge / 'heartbeat')
+        pairs['SESSION_WATCH_SOURCE_CONTROL'] = str(layout.control)
+        pairs['SESSION_WATCH_SOURCE_STATUS'] = str(layout.local / 'source.json')
+        pairs['SESSION_WATCH_MANAGED_LOG'] = str(layout.bridge / 'access.log')
     return ''.join(k + '=' + unit_quote(v) + '\n' for k, v in pairs.items())
 
 
@@ -330,6 +328,9 @@ def private_dirs(layout, uid, gid):
     layout.data.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chown(layout.data, uid, gid)
     os.chmod(layout.data, 0o700)
+    layout.control.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chown(layout.control, uid, gid)
+    os.chmod(layout.control, 0o700)
     for path in (layout.local, layout.bridge):
         path.mkdir(parents=True, exist_ok=True, mode=0o750)
         os.chown(path, 0, gid)
@@ -369,7 +370,7 @@ def backup(layout, state):
     for name in ('secret.key',):
         if (layout.data / name).exists():
             write(target / name, read_regular(layout.data / name))
-    for name in ('web.env', 'initial-admin.txt'):
+    for name in ('web.env', 'initial-admin.txt', 'source.json'):
         if (layout.config / name).exists():
             write(target / name, (layout.config / name).read_bytes())
     write(target / 'install.json', json.dumps(state, indent=2))
@@ -401,7 +402,7 @@ def restore(layout, target, uid, gid):
         if (target / name).exists():
             write(layout.data / name, (target / name).read_bytes())
             os.chown(layout.data / name, uid, gid)
-    for name in ('web.env', 'initial-admin.txt'):
+    for name in ('web.env', 'initial-admin.txt', 'source.json'):
         if (target / name).exists():
             write(layout.config / name, (target / name).read_bytes())
     for unit in layout.units:
@@ -478,7 +479,7 @@ def install(layout, args):
     if args.command == 'upgrade' and not (old and old.get('installed')):
         raise ValueError("No managed installation to upgrade")
     if not owned:
-        if any(p.exists() for p in (layout.home, layout.data, layout.local, layout.bridge, layout.config, layout.wrapper)) or any((UNIT_DIR / u).exists() for u in layout.units):
+        if any(p.exists() for p in (layout.home, layout.data, layout.local, layout.bridge, layout.control, layout.config, layout.wrapper)) or any((UNIT_DIR / u).exists() for u in layout.units):
             raise ValueError("Unmanaged installation/path exists. Refusing to overwrite; choose --instance NAME")
     # Keep the verified source package clean: importing installer helpers must
     # not create __pycache__ files that invalidate its release manifest.
@@ -509,7 +510,8 @@ def install(layout, args):
             'connection': c, 'sources': sources})
     release = prepare_release(layout, args, manifest, package_root)
     state = {'owner': MARKER, 'name': layout.name, 'installed': True, 'version': manifest['version'],
-             'release': str(release), 'python': str(Path(sys.executable).resolve()), 'connection': c, 'sources': sources}
+             'release': str(release), 'python': str(Path(sys.executable).resolve()), 'connection': c, 'sources': sources,
+             'collector_disabled': bool(args.no_collector or (args.command == 'upgrade' and old.get('collector_disabled', False)))}
     previous = None
     if old and old.get('installed'):
         stop(layout)
@@ -521,6 +523,7 @@ def install(layout, args):
     try:
         switch(layout, release)
         write(layout.config / 'web.env', environment(layout, state))
+        write(layout.config / 'source.json', json.dumps(sources))
         units = render_units(layout, state)
         for unit in layout.units:
             systemctl('disable', unit, check=False)
@@ -587,11 +590,9 @@ def doctor(layout, state):
             print('Online API unavailable: existing Xray must support online-user statistics and an existing loopback StatsService. No upstream config was changed.')
     except (OSError, ValueError, KeyError):
         print('Local snapshot: not yet available. Check source paths/collector journal; remote API mode is configurable in the UI.')
-    if not state['sources']['log']:
-        print('Access log: no existing file detected. If access=none, destination/IP statistics are unavailable. Nothing was enabled automatically; specify --log with an existing host file.')
-    else:
-        heartbeat = layout.bridge / 'heartbeat'
-        print('Log bridge:', 'fresh' if heartbeat.exists() and time.time() - heartbeat.stat().st_mtime < 15 else 'waiting/stale')
+    heartbeat = layout.bridge / 'heartbeat'
+    print('Log discovery:', 'disabled' if state.get('collector_disabled') else 'continuous (native + Docker)')
+    print('Log mirror:', 'fresh' if heartbeat.exists() and time.time() - heartbeat.stat().st_mtime < 15 else 'waiting for a readable source')
     print('Firewall and SELinux were not changed. Public HTTPS needs the chosen TCP port allowed by your firewall/security group.')
 
 
@@ -607,7 +608,7 @@ def uninstall(layout, state, args):
     state['installed'] = False
     write_state(layout, state)
     if args.purge:
-        for path in (layout.data, layout.local, layout.bridge, layout.config):
+        for path in (layout.data, layout.local, layout.bridge, layout.control, layout.config):
             if path.exists():
                 shutil.rmtree(path)
         run(['userdel', layout.name])
