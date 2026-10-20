@@ -100,6 +100,14 @@ def main(package):
             assert select_source(candidates({}),'docker:'+name)['container']['State']['Pid']!=original_pid
             print('PASS Docker: same-name container recreation automatically resolves new process/root.',flush=True)
             agent.close();run(['docker','rm','--force',name])
+            value['log']['access']='/app/logs/access.log';config.write_text(json.dumps(value))
+            bound=base/'bound-logs';bound.mkdir()
+            create('type=bind,src='+str(bound)+',dst=/app/logs')
+            wait(ready,'bind-mounted log')
+            source=select_source(candidates({}),'docker:'+name)
+            assert log_source(source,preference,{})[0]==bound/'access.log'
+            print('PASS Docker: bind-mounted log resolves to the host file.',flush=True)
+            agent.close();run(['docker','rm','--force',name])
             run(['docker','volume','create',volume])
             value['log']['access']='/app/logs/access.log';config.write_text(json.dumps(value))
             create('type=volume,src='+volume+',dst=/app/logs')
@@ -127,6 +135,32 @@ def main(package):
             wait(lambda: response.is_file(),'sandboxed preview')
             assert json.loads(response.read_text())['result']['ok']
             print('PASS Docker: installed systemd sandbox, permissions, persistent discovery and manual preview IPC.',flush=True)
+            # Exercise the web/runtime path too, including source generation and
+            # inode checks. Only this fixture emits test log records; TG is OFF.
+            credentials=Path('/etc/session-watch-'+instance+'/initial-admin.txt').read_text()
+            password=next(line.removeprefix('Password: ') for line in credentials.splitlines() if line.startswith('Password: '))
+            cookie=''
+            def api(path,method='GET',body=None):
+                nonlocal cookie
+                connection=http.client.HTTPConnection('127.0.0.1',18766,timeout=20)
+                headers={'Content-Type':'application/json','X-Requested-With':'session-watch'}
+                if cookie:headers['Cookie']=cookie
+                connection.request(method,'/api'+path,json.dumps(body) if body is not None else None,headers)
+                response=connection.getresponse();data=json.loads(response.read())
+                if response.getheader('set-cookie'):cookie=response.getheader('set-cookie').split(';')[0]
+                connection.close()
+                assert response.status==200,data
+                return data
+            api('/auth/login','POST',{'username':'admin','password':password})
+            assert api('/source/check','POST')['ok']
+            api('/monitor','POST',{'enabled':True})
+            wait(lambda: api('/snapshot')['health']['log']=='ok','runtime log health')
+            from datetime import datetime, timezone
+            line=datetime.now(timezone.utc).strftime('%Y/%m/%d %H:%M:%SZ')+' from 192.0.2.10:12345 accepted tcp:example.test:443 [fixture -> direct] email: fixture'
+            run(['docker','exec',name,'sh','-c','printf "%s\\n" "$1" >> /app/logs/access.log','fixture',line])
+            wait(lambda: api('/snapshot')['health']['parsed']>=1,'runtime parses mirrored record')
+            assert not api('/snapshot')['settings']['telegram_enabled']
+            print('PASS Docker: web source check and monitored runtime parsed a new fixture log record; Telegram off.',flush=True)
         finally:
             agent.close()
             marker=Path('/etc/session-watch-'+instance+'/install.json')
