@@ -3,7 +3,8 @@
 set -Eeuo pipefail
 if [[ " ${*} " == *' --help '* || " ${*} " == *' -h '* ]]; then
   echo 'Usage: bash online-install.sh --repo OWNER/REPOSITORY [--version latest|vX.Y.Z] [install|upgrade] [installer options]'
-  echo 'Public GitHub releases only. Default: latest stable release, loopback web access.'
+  echo 'Public GitHub releases only. SSH install prompts for access, port and admin credentials.'
+  echo 'Use --non-interactive for automation; --interactive to require a terminal.'
   exit 0
 fi
 [[ "$(uname -s)" == Linux && -d /run/systemd/system ]] || { echo 'Linux with running systemd required.' >&2; exit 1; }

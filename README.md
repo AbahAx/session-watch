@@ -2,7 +2,7 @@
 
 独立的 Xray 客户端活动监控与 Telegram 通知面板。
 
-**v0.4.1。** 同机部署可免输 3x-ui 账号密码，自动同步客户端清单、查询已有 Xray
+**v0.5.0。** 同机部署可免输 3x-ui 账号密码，自动同步客户端清单、查询已有 Xray
 在线状态并只读解析访问日志；不修改 3x-ui 程序、数据库、入站或客户端配置。
 仅提供正式运行，默认暂停活动统计与 Telegram 发送。本仓库不包含真实服务器资料或凭据。
 
@@ -14,16 +14,17 @@
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf session-watch-v0.4.1-linux.tar.gz
+tar -xzf session-watch-v0.5.0-linux.tar.gz
 cd session-watch
 sudo bash install.sh
 ```
 
-默认仅监听 `127.0.0.1:8765`，通过 SSH 隧道访问；直接公网访问需提供自己的域名和现有证书。
+在 SSH 终端安装时，向导会询问访问方式、端口、管理员用户名和密码。
+可选择本机 SSH 隧道访问，或使用现有证书通过 `https://你的域名:端口` 访问。
+升级保留现有账号；页面“系统设置 → 管理员账号”可修改用户名和密码。
 新安装默认关闭监控与 Telegram 发送，不自动启用 3x-ui 的访问日志或统计接口。
 源码仓库：[AbahAx/session-watch](https://github.com/AbahAx/session-watch)。
-正式安装包发布在 [Releases](https://github.com/AbahAx/session-watch/releases)；
-如果尚无正式版本，请先使用已下载的本地安装包，以下在线命令需在首个正式 Release 发布后使用。
+正式安装包发布在 [Releases](https://github.com/AbahAx/session-watch/releases)。
 
 ```bash
 bash <(curl -fsSL https://github.com/AbahAx/session-watch/releases/latest/download/online-install.sh) --repo AbahAx/session-watch
@@ -35,7 +36,7 @@ bash <(curl -fsSL https://github.com/AbahAx/session-watch/releases/latest/downlo
 ## 功能
 
 - 中文响应式管理界面：活动概览、客户端、活动记录、日志来源、通知中心、系统设置。
-- 独立管理员账号、登录限流、HttpOnly 会话 Cookie、修改密码及其他会话失效。
+- 独立管理员账号、登录限流、HttpOnly 会话 Cookie、修改用户名/密码及其他会话失效。
 - 按 email 识别账号，自定义显示名称、暂停单个账号监控。
 - 在线状态从离线变为在线时生成一条上线消息；持续离线满 **5 分钟**后生成一条下线汇总。
 - 等待期间恢复在线：继续同一轮活动，不重复发送上线提醒。

@@ -1,4 +1,4 @@
-# Linux 一键部署（v0.4.1）
+# Linux 一键部署（v0.5.0）
 
 这是独立的 Session Watch 安装包。服务器不需要 Node、npm 或 Docker。
 同机模式只读本机已有 3x-ui 数据库、Xray 在线统计接口和访问日志；不需要面板账号密码。
@@ -31,24 +31,45 @@ Python 3.14 尚未纳入本版本支持范围。
 
 ## 1. 上传并安装
 
-将 `session-watch-v0.4.1-linux.tar.gz` 和 `SHA256SUMS` 上传到新服务器的同一目录。
+将 `session-watch-v0.5.0-linux.tar.gz` 和 `SHA256SUMS` 上传到新服务器的同一目录。
 官方源码仓库为 [AbahAx/session-watch](https://github.com/AbahAx/session-watch)。
 安装包从 [Releases](https://github.com/AbahAx/session-watch/releases) 下载并核对校验值；
 如果尚无正式版本，请使用已下载的本地安装包，不要使用网上猜测的安装链接。
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf session-watch-v0.4.1-linux.tar.gz
+tar -xzf session-watch-v0.5.0-linux.tar.gz
 cd session-watch
 sudo bash install.sh
 ```
 
-一键命令即 `sudo bash install.sh`。默认监听 `127.0.0.1:8765`，默认管理账号 `admin`。
+在 SSH 终端执行 `sudo bash install.sh` 或下方在线命令，会出现交互向导：
+
+1. 选择本机访问（SSH 隧道），或域名 + 端口的 HTTPS 访问。
+2. 设置面板端口，范围 1024–65535。本机默认 8765，域名 HTTPS 默认 8443。
+3. 域名模式输入已解析的域名，例如 `watch.example.com`，以及现有证书/私钥路径。
+   自动查找 `/root/cert/域名`、Let’s Encrypt 和 acme.sh 的常见证书位置，确认路径后只读使用。
+4. 设置管理员用户名（默认 `admin`）和密码（12–256 个字符），密码隐藏输入并要求确认。
+   密码留空可生成随机密码。自选密码不会写入初始账号文件或安装日志。
+
+访问地址例如 `https://watch.example.com:8443`，端口请在服务器防火墙和云安全组放行。
+域名需指向本机，证书需匹配域名；本版本复用现有证书，不自动申请证书。
+
+非交互安装使用 `--non-interactive`，无真实终端时也自动采用非交互模式。
+默认仅监听 `127.0.0.1:8765`，管理员 `admin`，生成随机密码。
 初始随机密码保存在服务器 root 专用文件，安装日志不打印密码：
 
 ```bash
 sudo cat /etc/session-watch/initial-admin.txt
 ```
+
+自动化部署可通过 `--admin-username NAME --admin-password-file /root/watch-password`
+设置初始凭据；密码文件必须 root 所有、权限 600（或更严格），只包含一行密码。
+参数中不直接传明文密码。已有管理员时拒绝这些初始化参数，升级保留原账号。
+`--interactive` 可显式要求真实终端；`--dry-run` 始终不询问密码。
+
+登录后进入“系统设置 → 管理员账号”，验证当前密码即可修改用户名；
+新密码留空表示只改用户名。保存后当前浏览器保持登录，其他会话失效。
 
 在自己电脑上建立 SSH 隧道（替换 `YOUR_SERVER`，非 22 端口增加 `-p SSH端口`）：
 
@@ -56,7 +77,7 @@ sudo cat /etc/session-watch/initial-admin.txt
 ssh -L 8765:127.0.0.1:8765 root@YOUR_SERVER
 ```
 
-浏览器打开 `http://127.0.0.1:8765`。首次登录后修改密码。
+选择本机访问且使用默认端口时，浏览器打开 `http://127.0.0.1:8765`；自定义端口时相应替换隧道端口。
 已经改过密码的实例继续使用当前密码，初始密码文件不会跟随页面修改更新。
 
 新安装的 **监控和 Telegram 推送均关闭**。在“节点接入”查看来源健康状态，
@@ -65,16 +86,9 @@ ssh -L 8765:127.0.0.1:8765 root@YOUR_SERVER
 
 ## 像 3x-ui 一样在线安装
 
-在线入口已准备好，以下命令针对官方仓库 `AbahAx/session-watch`。
-首个正式 Release 发布之前，latest 下载地址还不可用。发布者需要先完成：
-
-1. 在 GitHub 创建公开仓库，把源码包内容放到仓库根目录，保留 `.github/workflows`。
-2. 推送与 `app/__init__.py` 一致的版本标签，例如 `v0.4.1`。Actions 自动测试、
-   构建前端、打包，并生成草稿 Release；也可以手动上传本地生成的发布文件。
-3. 检查草稿内有 Linux 压缩包、源码包、`SHA256SUMS`、`online-install.sh`，
-   然后点击 **Publish release**，发布为正式版，不勾选预发布。
-4. 正式版本发布后，用户在 Linux root 终端运行下方命令。
-   分支仓库的维护者需把两处 `AbahAx/session-watch` 换成自己的仓库名。
+在 root SSH 终端运行以下命令，下载正式最新版并进入安装向导。
+发布者需推送与 `app/__init__.py` 一致的版本标签；Actions 构建并生成草稿 Release，
+检查附件后发布为正式版。分支仓库维护者将下方两处仓库名称替换为自己的仓库。
 
 ```bash
 bash <(curl -fsSL https://github.com/AbahAx/session-watch/releases/latest/download/online-install.sh) --repo AbahAx/session-watch
@@ -88,11 +102,11 @@ bash <(curl -fsSL https://github.com/AbahAx/session-watch/releases/latest/downlo
 
 ```bash
 # 安装指定正式版本
-bash online-install.sh --repo AbahAx/session-watch --version v0.4.1 install
+bash online-install.sh --repo AbahAx/session-watch --version v0.5.0 install
 
 # 安装并直接提供公网 HTTPS；替换示例域名/现有证书路径
 bash online-install.sh --repo AbahAx/session-watch install \
-  --host 0.0.0.0 --port 8443 --domain watch.example.com \
+  --non-interactive --host 0.0.0.0 --port 8443 --domain watch.example.com \
   --cert /etc/ssl/watch/fullchain.pem --key /etc/ssl/watch/privkey.pem
 
 # 下载最新版并升级由本安装器创建的默认实例

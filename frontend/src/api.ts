@@ -18,7 +18,7 @@ export type Session = { id: number; email: string; alias: string; state: string;
   first_target: string; first_inbound: string }
 export type Notification = { id: number; alias: string; email: string; kind: string; text: string;
   created_at: number; status: string; error: string; attempts: number; session_id: number }
-export type Snapshot = { version: string; now: number; settings: Settings;
+export type Snapshot = { version: string; now: number; settings: Settings; admin_username: string;
   health: { panel: string; log: string; inventory: string; last_inventory: number | null; last_log_check: number | null;
     log_detail: string; last_poll: number | null; last_log: number | null; parsed: number; skipped: number; detail: string };
   delivery: {status: string; pending: number; failed: number; oldest: number | null; last_success: number | null; last_error: string};

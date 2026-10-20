@@ -445,29 +445,27 @@ def healthy(state, seconds=35):
         time.sleep(0.5)
 
 
-def bootstrap_data(layout, state, log_timezone):
-    password = secrets.token_urlsafe(21)
+def bootstrap_data(layout, state, log_timezone, admin):
     # Secret travels via stdin, never argv, the environment or command logs.
     payload = json.dumps({'data': str(layout.data), 'snapshot': str(layout.local / 'snapshot.json'),
         'log': str(layout.bridge / 'access.log') if state['sources']['log'] else '',
-        'timezone': log_timezone, 'password': password})
-    script = '''import json,sys
-from pathlib import Path
-from app.storage import Store,password_hash
-p=json.load(sys.stdin)
-s=Store(Path(p['data']))
-created=not bool(s.get('admin'))
-if created:
-    s.set('admin',{'username':'admin','password':password_hash(p['password'])})
-    settings=s.settings().model_copy(update={'local_snapshot_path':p['snapshot'],'log_path':p['log'],'log_timezone':p['timezone']})
-    s.save_settings(settings)
-s.close()
-print('created' if created else 'preserved')
-'''
-    result = run(['runuser', '-u', layout.name, '--', layout.home / 'current/.venv/bin/python', '-c', script],
+        'timezone': log_timezone, 'username': admin.username if admin else '',
+        'password': admin.password if admin else ''})
+    result = run(['runuser', '-u', layout.name, '--', layout.home / 'current/.venv/bin/python', '-m', 'app.bootstrap'],
                  input=payload, text=True, capture_output=True, cwd=layout.home / 'current')
     if result.stdout.strip() == 'created':
-        write(layout.config / 'initial-admin.txt', 'Username: admin\nPassword: ' + password + '\nChange this password after first login.\n')
+        detail = ('Password: ' + admin.password) if admin.generated else 'Password: supplied during installation; not stored here.'
+        write(layout.config / 'initial-admin.txt', 'Username: ' + admin.username + '\n' + detail + '\nChange credentials later in the web account settings.\n')
+
+
+def check_listen_port(connection, old=None):
+    if old and old.get('installed') and connection['port'] == old['connection']['port']:
+        return
+    with socket.socket() as probe:
+        try:
+            probe.bind((connection['host'], connection['port']))
+        except OSError as exc:
+            raise ValueError(f"面板端口 {connection['port']} 不可用，请更换端口后重试") from exc
 
 
 def install(layout, args):
@@ -482,7 +480,13 @@ def install(layout, args):
     if not owned:
         if any(p.exists() for p in (layout.home, layout.data, layout.local, layout.bridge, layout.config, layout.wrapper)) or any((UNIT_DIR / u).exists() for u in layout.units):
             raise ValueError("Unmanaged installation/path exists. Refusing to overwrite; choose --instance NAME")
-    c = connection(args, old.get('connection') if old else None)
+    # Keep the verified source package clean: importing installer helpers must
+    # not create __pycache__ files that invalidate its release manifest.
+    sys.dont_write_bytecode = True
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from deploy.install_wizard import prepare_preferences
+    c, admin = prepare_preferences(args, old, layout.data, connection, check_listen_port, read_regular)
     if args.command == 'upgrade' and not any((args.database, args.config, args.binary, args.log, args.no_collector)):
         sources = old['sources']
     else:
@@ -491,10 +495,6 @@ def install(layout, args):
                 if getattr(args, key) is None:
                     setattr(args, key, old['sources'][key] or None)
         sources = source_paths(args, layout)
-    # Check bind before any mutation. Existing managed listener is allowed on upgrade.
-    if not (old and old.get('installed') and c['port'] == old['connection']['port']):
-        with socket.socket() as probe:
-            probe.bind((c['host'], c['port']))
     plan = {'version': manifest['version'], 'instance': layout.name, 'connection': c, 'sources': sources,
             'data': str(layout.data), 'system_python': sys.executable}
     print(json.dumps(plan, indent=2, ensure_ascii=False))
@@ -527,7 +527,7 @@ def install(layout, args):
             (UNIT_DIR / unit).unlink(missing_ok=True)
         for unit, text in units.items():
             write(UNIT_DIR / unit, text, 0o644)
-        bootstrap_data(layout, state, args.log_timezone or system_timezone())
+        bootstrap_data(layout, state, args.log_timezone or system_timezone(), admin)
         write_state(layout, state)
         wrapper = '#!/bin/sh\nexec ' + shell_quote(str(layout.home / 'current/.venv/bin/python')) + ' ' + shell_quote(str(layout.home / 'current/deploy/install_manager.py')) + ' "$@" --instance ' + shell_quote(layout.instance) + '\n'
         write(layout.wrapper, wrapper, 0o755)
@@ -622,6 +622,12 @@ def parser():
     p.add_argument('--instance', default='')
     p.add_argument('--dry-run', action='store_true')
     p.add_argument('--no-install-deps', action='store_true')
+    interaction = p.add_mutually_exclusive_group()
+    interaction.add_argument('--interactive', dest='interactive', action='store_true', help='Prompt using the controlling SSH terminal')
+    interaction.add_argument('--non-interactive', dest='interactive', action='store_false', help='Use flags/defaults without prompting')
+    p.set_defaults(interactive=None)
+    p.add_argument('--admin-username', help='Initial administrator name; existing administrators are preserved')
+    p.add_argument('--admin-password-file', help='Root-owned 600 file with the initial password (never use a password in argv)')
     p.add_argument('--package-dir', help='Clean extracted release directory (required when upgrading via the installed management command)')
     p.add_argument('--host')
     p.add_argument('--port', type=int)

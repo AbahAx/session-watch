@@ -3,6 +3,7 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator
+from app.accounts import admin_username, admin_password
 
 
 class Settings(BaseModel):
@@ -56,4 +57,20 @@ class Credentials(BaseModel):
 class UserUpdate(BaseModel):
     alias: str = Field(max_length=80)
     monitored: bool = True
+
+
+class AccountUpdate(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    current_password: str = Field(max_length=256)
+    new_password: str = Field(default='', max_length=256)
+
+    @field_validator('username')
+    @classmethod
+    def valid_username(cls, value):
+        return admin_username(value)
+
+    @field_validator('new_password')
+    @classmethod
+    def valid_password(cls, value):
+        return admin_password(value) if value else ''
 

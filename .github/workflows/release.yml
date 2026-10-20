@@ -33,7 +33,7 @@ jobs:
           mkdir /tmp/session-watch-release
           tar -xzf dist/session-watch-v*-linux.tar.gz -C /tmp/session-watch-release
           cd /tmp/session-watch-release/session-watch
-          sudo env SESSION_WATCH_PYTHON="$(command -v python)" bash install.sh install --instance ci --port 18765 --no-collector --no-install-deps
+          sudo env SESSION_WATCH_PYTHON="$(command -v python)" bash install.sh install --non-interactive --instance ci --port 18765 --no-collector --no-install-deps
           sudo session-watch-ci backup
           sudo env SESSION_WATCH_PYTHON="$(command -v python)" bash install.sh upgrade --instance ci --no-install-deps
           sudo session-watch-ci rollback

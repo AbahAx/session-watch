@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import secrets
 import time
@@ -17,7 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app import __version__
 from app.engine import render_message
 from app.integrations import DeliveryError, IntegrationError, PanelClient, send_telegram
-from app.models import Credentials, Settings, UserUpdate
+from app.models import AccountUpdate, Credentials, Settings, UserUpdate
 from app.local_source import read_snapshot, sync_clients, online_set
 from app.runtime import InstanceLock, Runtime
 from app.storage import SECRET_FIELDS, Store, password_hash, password_matches, token_hash
@@ -32,6 +33,7 @@ def create_app(data_dir: Path | None = None, background=True):
     runtime = Runtime(store)
     lock = InstanceLock(directory)
     login_attempts: dict[str, list[float]] = {}
+    account_attempts: dict[str, list[float]] = {}
     secure_cookie = os.environ.get("SESSION_WATCH_SECURE_COOKIE", "0") == "1"
 
     @asynccontextmanager
@@ -103,6 +105,10 @@ def create_app(data_dir: Path | None = None, background=True):
     @app.get("/api/auth/status")
     def auth_status(request: Request):
         return {"initialized": store.get("admin") is not None, "authenticated": logged_in(request)}
+
+    @app.get('/api/auth/account', dependencies=[Depends(require_auth)])
+    def account():
+        return {'username': store.get('admin')['username']}
 
     @app.post("/api/auth/setup")
     def setup(body: Credentials, request: Request, response: Response):
@@ -332,17 +338,41 @@ def create_app(data_dir: Path | None = None, background=True):
         current_password: str = Field(max_length=256)
         new_password: str = Field(min_length=12, max_length=256)
 
-    @app.post("/api/auth/password", dependencies=[Depends(require_auth)])
-    def change_password(body: ChangePassword, response: Response):
-        admin = store.get("admin")
-        if not password_matches(body.current_password, admin["password"]):
-            raise HTTPException(400, "当前密码错误")
-        admin["password"] = password_hash(body.new_password)
-        store.set("admin", admin)
+    def update_account(current_password, username, new_password, request, response):
+        address = request.client.host if request.client else 'unknown'
+        now = time.time()
+        # One transaction changes credentials and revokes every previous session.
+        # Concurrent changes must re-check the latest password under the lock.
         with store.transaction() as db:
-            db.execute("DELETE FROM admin_sessions")
-        make_session(response)
-        return {"ok": True}
+            if len(account_attempts) > 1000:
+                account_attempts.clear()
+            attempts = [t for t in account_attempts.get(address, []) if now - t < 600]
+            if len(attempts) >= 5:
+                raise HTTPException(429, '验证过于频繁，请 10 分钟后重试')
+            admin = store.get('admin')
+            if not password_matches(current_password, admin['password']):
+                account_attempts[address] = [*attempts, now]
+                raise HTTPException(400, '当前密码错误')
+            changed = (username is not None and username != admin['username']) or bool(new_password)
+            if changed:
+                if username is not None:
+                    admin['username'] = username
+                if new_password:
+                    admin['password'] = password_hash(new_password)
+                db.execute("UPDATE kv SET value=? WHERE key='admin'", (json.dumps(admin, ensure_ascii=False),))
+                db.execute('DELETE FROM admin_sessions')
+            account_attempts.pop(address, None)
+        if changed:
+            make_session(response)
+        return {'ok': True, 'username': admin['username'], 'changed': changed}
+
+    @app.put('/api/auth/account', dependencies=[Depends(require_auth)])
+    def change_account(body: AccountUpdate, request: Request, response: Response):
+        return update_account(body.current_password, body.username, body.new_password, request, response)
+
+    @app.post("/api/auth/password", dependencies=[Depends(require_auth)])
+    def change_password(body: ChangePassword, request: Request, response: Response):
+        return update_account(body.current_password, None, body.new_password, request, response)
 
     @app.get("/api/snapshot", dependencies=[Depends(require_auth)])
     def snapshot():
@@ -380,6 +410,7 @@ def create_app(data_dir: Path | None = None, background=True):
             histogram.append({"hour": i, "count": count})
         return {
             "version": __version__, "now": now, "settings": store.public_settings(),
+            "admin_username": store.get('admin')['username'],
             "health": runtime.health, 'delivery': runtime.delivery_health(),
             "users": users, "sessions": sessions, "notifications": notifications, "targets": targets,
             "totals": {**totals, "online": sum(u["state"] == "online" for u in users), "pending": sum(u["state"] == "pending" for u in users),

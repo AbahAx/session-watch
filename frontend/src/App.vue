@@ -25,7 +25,7 @@ const toast = ref(''), toastError = ref(false), mobileMenu = ref(false)
 const connectionLost = ref(false)
 const selected = ref<SessionDetail | null>(null), detailLoading = ref(false), notification = ref<Notification | null>(null)
 const editUser = ref<User | null>(null), alias = ref(''), monitored = ref(true)
-const currentPassword = ref(''), newPassword = ref(''), helpOpen = ref(false)
+const accountUsername = ref(''), accountBase = ref(''), currentPassword = ref(''), newPassword = ref(''), confirmPassword = ref(''), helpOpen = ref(false)
 const previewKind = ref<'online' | 'offline'>('offline')
 let timer: ReturnType<typeof setInterval> | undefined, toastTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -86,6 +86,8 @@ async function refresh(resetForm = false) {
   try {
     const result = await api<Snapshot>('/snapshot')
     data.value = result
+    if (resetForm || accountUsername.value === accountBase.value) accountUsername.value = result.admin_username
+    accountBase.value = result.admin_username
     connectionLost.value = false
     if (resetForm || !form.value || !formDirty.value) {
       form.value = {...result.settings, panel_password: '', panel_totp: '', telegram_token: ''}
@@ -178,10 +180,13 @@ async function retry(id: number) {
 async function testTelegram() {
   await action(async () => { const result = await api('/telegram/test', 'POST'); notify(result.message || '测试完成') })
 }
-async function changePassword() {
+async function changeAccount() {
   await action(async () => {
-    await api('/auth/password', 'POST', {current_password: currentPassword.value, new_password: newPassword.value})
-    currentPassword.value = ''; newPassword.value = ''; notify('密码已更新，其他登录会话已失效')
+    if (newPassword.value !== confirmPassword.value) throw new Error('两次新密码不同，请重新输入')
+    const result = await api<{changed:boolean}>('/auth/account', 'PUT', {username: accountUsername.value.trim(), current_password: currentPassword.value, new_password: newPassword.value})
+    currentPassword.value = ''; newPassword.value = ''; confirmPassword.value = ''
+    await refresh(true)
+    notify(result.changed ? '管理员账号已更新，其他登录会话已失效' : '账号信息没有变化')
   })
 }
 function expired() { authenticated.value = false; data.value = null; form.value = null; notify('登录已过期，请重新登录', true) }
@@ -212,7 +217,7 @@ onUnmounted(() => {clearInterval(timer); clearTimeout(toastTimer); window.remove
     </section>
     <section class="auth-panel"><div class="auth-card"><span class="eyebrow">YOUR PRIVATE OBSERVATORY</span><h2>{{ initialized ? '欢迎回来' : '创建你的管理账号' }}</h2><p>{{ initialized ? '登录以查看客户端活动与通知。' : '首次使用，先设置一个独立于 3x-ui 的管理员账号。' }}</p>
       <form @submit.prevent="authenticate"><label>管理员账号<input v-model="username" autocomplete="username" required maxlength="80" placeholder="输入管理员账号"/></label><label>密码<input v-model="password" type="password" :autocomplete="initialized ? 'current-password' : 'new-password'" required minlength="12" maxlength="256" placeholder="至少 12 个字符"/></label><div v-if="authError" class="error-box">{{ authError }}</div><button class="button primary full" :disabled="busy"><LoaderCircle v-if="busy" class="spin" :size="16"/>{{ initialized ? '登录控制台' : '创建账号并进入' }}<ArrowUpRight :size="17"/></button></form>
-      <div class="auth-note"><ShieldCheck :size="16"/><span>独立管理账号；同机部署可免密读取 3x-ui 客户端与在线状态。</span></div></div><span class="auth-copyright">SESSION WATCH / v0.4.1</span></section>
+      <div class="auth-note"><ShieldCheck :size="16"/><span>独立管理账号；同机部署可免密读取 3x-ui 客户端与在线状态。</span></div></div><span class="auth-copyright">SESSION WATCH / v0.5.0</span></section>
   </main>
   <div v-else-if="data && form" class="app-shell">
     <div v-if="mobileMenu" class="sidebar-scrim" @click="mobileMenu=false"></div>
@@ -272,7 +277,7 @@ onUnmounted(() => {clearInterval(timer); clearTimeout(toastTimer); window.remove
         </template>
 
         <template v-if="page==='settings'">
-          <div class="settings-layout"><div class="settings-stack"><article class="panel form-panel"><div class="section-heading"><span class="section-icon"><SlidersHorizontal :size="19"/></span><div><h2>运行设置</h2><p>普通设置保存后即时生效</p></div></div><fieldset><div class="form-row"><label>状态查询间隔（秒）<input v-model.number="form.poll_seconds" type="number" min="5" max="60"/></label><label>活动保留时间（天）<input v-model.number="form.retention_days" type="number" min="1" max="365"/></label></div></fieldset><label>页面与通知显示时区<input v-model="form.timezone" placeholder="Asia/Shanghai"/></label><p class="muted small-text">只清理本项目的过期活动统计，不删除源访问日志。未发送消息对应的活动会保留。</p></article><article class="panel form-panel"><div class="section-heading"><span class="section-icon"><ShieldCheck :size="19"/></span><div><h2>管理员密码</h2><p>更新后其他登录会话立即失效</p></div></div><form @submit.prevent="changePassword"><label>当前密码<input v-model="currentPassword" type="password" autocomplete="current-password" required/></label><label>新密码<input v-model="newPassword" type="password" autocomplete="new-password" minlength="12" required placeholder="至少 12 个字符"/></label><div class="form-actions"><span></span><button class="button" :disabled="busy">更新密码</button></div></form></article><article class="panel form-panel"><h2>运行诊断</h2><div v-if="!data.diagnostics.length" class="empty compact-empty"><Check :size="18"/> 暂无异常记录</div><div v-for="(entry,i) in data.diagnostics" :key="i" class="diagnostic"><span>{{ clock(entry.at) }}</span><span>{{ entry.message }}</span></div></article></div><aside class="settings-aside"><article class="aside-note"><Activity :size="25"/><h3>Session Watch</h3><p>独立的 Xray 活动观察与通知面板。</p><p>版本 {{ data.version }}<br/>单节点 · SQLite · Telegram</p><p>在线状态遵循上游核心与面板实现，不代表设备是否联网。连接记录数也不等于网页访问次数。</p></article></aside></div>
+          <div class="settings-layout"><div class="settings-stack"><article class="panel form-panel"><div class="section-heading"><span class="section-icon"><SlidersHorizontal :size="19"/></span><div><h2>运行设置</h2><p>普通设置保存后即时生效</p></div></div><fieldset><div class="form-row"><label>状态查询间隔（秒）<input v-model.number="form.poll_seconds" type="number" min="5" max="60"/></label><label>活动保留时间（天）<input v-model.number="form.retention_days" type="number" min="1" max="365"/></label></div></fieldset><label>页面与通知显示时区<input v-model="form.timezone" placeholder="Asia/Shanghai"/></label><p class="muted small-text">只清理本项目的过期活动统计，不删除源访问日志。未发送消息对应的活动会保留。</p></article><article class="panel form-panel"><div class="section-heading"><span class="section-icon"><ShieldCheck :size="19"/></span><div><h2>管理员账号</h2><p>验证当前密码后修改；其他登录会话将失效</p></div></div><form @submit.prevent="changeAccount"><label>管理员用户名<input v-model="accountUsername" autocomplete="username" required maxlength="80"/></label><label>当前密码<input v-model="currentPassword" type="password" autocomplete="current-password" required maxlength="256"/></label><label>新密码（可选）<input v-model="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="留空保留当前密码"/></label><label v-if="newPassword">确认新密码<input v-model="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="256"/></label><div class="form-actions"><span></span><button class="button" :disabled="busy">保存管理员账号</button></div></form></article><article class="panel form-panel"><h2>运行诊断</h2><div v-if="!data.diagnostics.length" class="empty compact-empty"><Check :size="18"/> 暂无异常记录</div><div v-for="(entry,i) in data.diagnostics" :key="i" class="diagnostic"><span>{{ clock(entry.at) }}</span><span>{{ entry.message }}</span></div></article></div><aside class="settings-aside"><article class="aside-note"><Activity :size="25"/><h3>Session Watch</h3><p>独立的 Xray 活动观察与通知面板。</p><p>版本 {{ data.version }}<br/>单节点 · SQLite · Telegram</p><p>在线状态遵循上游核心与面板实现，不代表设备是否联网。连接记录数也不等于网页访问次数。</p></article></aside></div>
         </template>
         <footer class="page-footer"><span><ShieldCheck :size="13"/>只读观察，自主掌控</span><span>Session Watch · 本地工作空间 <span class="footer-divider">/</span> {{ data.settings.timezone }}</span></footer>
       </div>
