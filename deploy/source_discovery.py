@@ -165,6 +165,9 @@ def candidates(hints, proc=None, docker=None):
         except (OSError, ValueError, KeyError):
             continue
     native = [p for p in proc if p['mount'] not in container_mounts and p.get('native', True) and p.get('uid', 0) == 0]
+    if len(native) > 1:
+        result.append({'id': 'native', 'label': '原生 · 多个 Xray 核心', 'kind': 'native',
+                       'error': '发现多个原生 Xray 核心；请由管理员明确配置目标核心，避免混用日志'})
     # Never silently combine two cores/instances into one client's sessions.
     if len(native) <= 1:
         db = next((Path(p) for p in [hints.get('database'), '/etc/x-ui/x-ui.db', '/usr/local/x-ui/db/x-ui.db'] if p and Path(p).is_file()), None)
@@ -181,10 +184,13 @@ def select_source(choices, target):
     if target == 'auto':
         if len(choices) != 1:
             raise ValueError('发现多个 3x-ui，请选择采集实例' if choices else '尚未发现运行中的本机 3x-ui；将持续重试')
-        return choices[0]
-    found = next((c for c in choices if c['id'] == target), None)
+        found = choices[0]
+    else:
+        found = next((c for c in choices if c['id'] == target), None)
     if found is None:
         raise ValueError('指定实例尚未运行或已移除；将持续重试')
+    if found.get('error'):
+        raise ValueError(found['error'])
     return found
 
 

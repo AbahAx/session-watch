@@ -105,7 +105,8 @@ class TestPosixDiscovery:
         assert not (tmp_path/'mirror/heartbeat').exists()
         log=tmp_path/'access.log';log.write_bytes(b'historical\n')
         source['config'].write_text(json.dumps({'log':{'access':str(log)}}))
-        agent.refresh(preference)
+        agent.last_collect = 0
+        agent.step()  # periodic discovery, no operator/reinstall call
         assert agent.bridge and agent.bridge.output.read_bytes()==b''
         with log.open('ab') as f:f.write(b'new\n')
         agent.step()
@@ -122,6 +123,12 @@ class TestPosixDiscovery:
         assert resumed.bridge.output.read_bytes()==b''
         assert log.read_bytes()==original+b'during-restart\n' and other.read_bytes()==b'historical-other\n'
         resumed.close()
+
+    def test_native_unprivileged_fake_core_is_not_executed_or_selected(self,tmp_path):
+        db=tmp_path/'db';db.touch()
+        choices=discovery.candidates({'database':str(db)}, proc=[
+            {'pid':123,'native':True,'uid':1000,'mount':'user','exe':tmp_path/'xray','cwd':tmp_path,'args':[]}],docker=[])
+        assert not any(c.get('process') for c in choices)
 
     def test_agent_manual_preview_never_switches_active_mirror(self,tmp_path,monkeypatch):
         source=self.source(tmp_path)
